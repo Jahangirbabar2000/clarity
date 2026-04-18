@@ -57,11 +57,8 @@ export async function POST(req: Request) {
       };
 
       try {
-        const { context, draft, critique } = await runBuildTicketPipeline(
-          idea,
-          org.id,
-          emit,
-        );
+        const { context, draft, critique, iterations, critiqueHistory } =
+          await runBuildTicketPipeline(idea, org.id, emit);
 
         // Surface the context snapshot the old UI expects.
         send(controller, {
@@ -111,11 +108,24 @@ export async function POST(req: Request) {
           ticketId: ticket.id,
           ticket,
           critique,
+          iterations,
+          critiqueHistory,
+        });
+        // Typed terminal event (new, unambiguous). The legacy `phase: "done"` above
+        // stays for backwards compatibility with older UI code.
+        send(controller, {
+          pipeline_event: {
+            type: "pipeline_complete",
+            ticketId: ticket.id,
+            iterations,
+            verdict: critique.verdict,
+          },
         });
       } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        send(controller, { phase: "error", message });
         send(controller, {
-          phase: "error",
-          message: err instanceof Error ? err.message : "unknown error",
+          pipeline_event: { type: "pipeline_failed", message },
         });
       } finally {
         controller.close();

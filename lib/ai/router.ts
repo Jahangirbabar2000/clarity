@@ -23,6 +23,7 @@ import type {
   ChatResponse,
   ProviderId,
 } from "./providers/types";
+import { recordModelCall } from "./usage";
 
 export type TaskType =
   | "long_context_summary"
@@ -156,21 +157,36 @@ export interface RouteDecision {
 }
 
 /**
+ * Ordered list of (target, isPreferred) for every *configured* provider in
+ * the task's preference chain. The first entry is what we'll try first;
+ * the rest are runtime fallbacks used by {@link routeChat} / {@link routeChatStream}
+ * if the primary provider errors (rate limit, transient 5xx, bad API key, etc.).
+ */
+export function candidateTargets(task: TaskType): RouteDecision[] {
+  const chain = ROUTING_TABLE[task];
+  const configured = new Set(configuredProviderIds());
+  const decisions: RouteDecision[] = [];
+  for (let i = 0; i < chain.length; i++) {
+    const target = chain[i];
+    if (configured.has(target.provider)) {
+      decisions.push({ task, target, isPreferred: i === 0 });
+    }
+  }
+  return decisions;
+}
+
+/**
  * Pick the first configured provider from the task's preference chain.
  * Throws if no provider at all is configured.
  */
 export function routeDecision(task: TaskType): RouteDecision {
-  const chain = ROUTING_TABLE[task];
-  const configured = new Set(configuredProviderIds());
-  for (let i = 0; i < chain.length; i++) {
-    const target = chain[i];
-    if (configured.has(target.provider)) {
-      return { task, target, isPreferred: i === 0 };
-    }
+  const candidates = candidateTargets(task);
+  if (candidates.length === 0) {
+    throw new Error(
+      `No LLM provider configured for task "${task}". Set at least one of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY.`,
+    );
   }
-  throw new Error(
-    `No LLM provider configured for task "${task}". Set at least one of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY.`,
-  );
+  return candidates[0];
 }
 
 export interface RouteChatParams {
@@ -178,33 +194,126 @@ export interface RouteChatParams {
   messages: ChatMessage[];
   maxTokens?: number;
   temperature?: number;
+  /**
+   * Called if a provider attempt fails and the router falls over to the
+   * next candidate. Lets the caller (usually an agent) emit a progress
+   * event so the UI can show the fallback.
+   */
+  onFallback?: (failure: RouteFailure, next: RouteTarget) => void;
+  /**
+   * Usage-tracking metadata. When present, every provider attempt is logged
+   * to the ModelCall ledger so Settings > AI Usage can render tokens/cost
+   * breakdowns. Agents pass `agent: this.name`; orgId is threaded through
+   * from the API layer where available.
+   */
+  meta?: {
+    agent?: string;
+    orgId?: string;
+  };
 }
 
-export async function routeChat(params: RouteChatParams): Promise<ChatResponse & { task: TaskType; isPreferred: boolean }> {
-  const decision = routeDecision(params.task);
-  const req: ChatRequest = {
-    model: decision.target.model,
-    messages: params.messages,
-    maxTokens: params.maxTokens,
-    temperature: params.temperature,
-  };
-  const resp = await providers[decision.target.provider].chat(req);
-  return { ...resp, task: params.task, isPreferred: decision.isPreferred };
+export interface RouteFailure {
+  target: RouteTarget;
+  error: Error;
+}
+
+export interface RouteChatResult extends ChatResponse {
+  task: TaskType;
+  isPreferred: boolean;
+  /** The target actually used (may differ from preferred after runtime fallback). */
+  usedTarget: RouteTarget;
+  /** Targets that were tried and failed, in order. Empty if the primary worked. */
+  fallbacks: RouteFailure[];
+}
+
+async function runWithFallback(
+  params: RouteChatParams,
+  exec: (target: RouteTarget, req: ChatRequest) => Promise<ChatResponse>,
+): Promise<RouteChatResult> {
+  const candidates = candidateTargets(params.task);
+  if (candidates.length === 0) {
+    throw new Error(
+      `No LLM provider configured for task "${params.task}". Set at least one of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY.`,
+    );
+  }
+
+  const fallbacks: RouteFailure[] = [];
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const decision = candidates[i];
+    const req: ChatRequest = {
+      model: decision.target.model,
+      messages: params.messages,
+      maxTokens: params.maxTokens,
+      temperature: params.temperature,
+    };
+    const wasFallback = i > 0;
+    const attemptStartedAt = Date.now();
+    try {
+      const resp = await exec(decision.target, req);
+      // Fire-and-forget ledger write. We don't await — tracking should never
+      // be on the critical path of a user request.
+      void recordModelCall({
+        orgId: params.meta?.orgId,
+        agent: params.meta?.agent,
+        task: params.task,
+        provider: decision.target.provider,
+        model: decision.target.model,
+        inputTokens: resp.usage?.inputTokens,
+        outputTokens: resp.usage?.outputTokens,
+        durationMs: Date.now() - attemptStartedAt,
+        success: true,
+        wasFallback,
+      });
+      return {
+        ...resp,
+        task: params.task,
+        isPreferred: decision.isPreferred && fallbacks.length === 0,
+        usedTarget: decision.target,
+        fallbacks,
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      lastError = error;
+      fallbacks.push({ target: decision.target, error });
+      void recordModelCall({
+        orgId: params.meta?.orgId,
+        agent: params.meta?.agent,
+        task: params.task,
+        provider: decision.target.provider,
+        model: decision.target.model,
+        durationMs: Date.now() - attemptStartedAt,
+        success: false,
+        wasFallback,
+        errorMessage: error.message,
+      });
+      const next = candidates[i + 1];
+      if (next && params.onFallback) {
+        params.onFallback({ target: decision.target, error }, next.target);
+      }
+    }
+  }
+
+  throw new Error(
+    `All ${candidates.length} configured provider${candidates.length === 1 ? "" : "s"} failed for task "${params.task}". ` +
+      `Last error: ${lastError?.message ?? "unknown"}`,
+  );
+}
+
+export async function routeChat(params: RouteChatParams): Promise<RouteChatResult> {
+  return runWithFallback(params, (target, req) =>
+    providers[target.provider].chat(req),
+  );
 }
 
 export async function routeChatStream(
   params: RouteChatParams,
   onDelta: (delta: string) => void,
-): Promise<ChatResponse & { task: TaskType; isPreferred: boolean }> {
-  const decision = routeDecision(params.task);
-  const req: ChatRequest = {
-    model: decision.target.model,
-    messages: params.messages,
-    maxTokens: params.maxTokens,
-    temperature: params.temperature,
-  };
-  const resp = await providers[decision.target.provider].chatStream(req, onDelta);
-  return { ...resp, task: params.task, isPreferred: decision.isPreferred };
+): Promise<RouteChatResult> {
+  return runWithFallback(params, (target, req) =>
+    providers[target.provider].chatStream(req, onDelta),
+  );
 }
 
 /** Human-readable snapshot of the current routing state, for UI/Settings display. */

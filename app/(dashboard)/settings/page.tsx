@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@
 import { Github, BookOpen, FileText, Database, AlertCircle, Activity, Upload } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 import { AIRoutingPanel } from "@/components/settings/AIRoutingPanel";
+import { AIUsagePanel } from "@/components/settings/AIUsagePanel";
 import type { IntegrationStatus } from "@/types/api";
 
 type IntegrationKey = IntegrationStatus["type"];
@@ -47,6 +48,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <AIRoutingPanel />
+
+      <AIUsagePanel />
 
       <div>
         <h2 className="text-xl font-semibold">Integrations</h2>

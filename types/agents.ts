@@ -47,6 +47,13 @@ export type AgentEvent =
       type: "agent_error";
       agent: string;
       message: string;
+    }
+  | {
+      type: "reflection";
+      iteration: number;
+      maxIterations: number;
+      verdict: "approved" | "approved_with_notes" | "needs_revision";
+      message: string;
     };
 
 export type CritiqueSeverity = "info" | "warning" | "blocker";
@@ -66,8 +73,18 @@ export type CritiqueNote = {
   suggestion?: string;
 };
 
+export type CritiqueToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+  resultPreview: string;
+  durationMs: number;
+  error?: string;
+};
+
 export type CritiqueReport = {
   verdict: "approved" | "approved_with_notes" | "needs_revision";
   summary: string;
   notes: CritiqueNote[];
+  /** Tool calls the Critic made while forming its judgment (tool-use path only). */
+  toolCalls?: CritiqueToolCall[];
 };

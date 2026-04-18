@@ -132,7 +132,7 @@ export default function NewTicketPage() {
           <AgentTimeline
             events={agentEvents}
             title="Multi-agent pipeline"
-            subtitle="Context → Writer → Critic"
+            subtitle="Context → Writer → Critic (↻ reflection)"
           />
         ) : null}
         {phase.name === "error" ? (

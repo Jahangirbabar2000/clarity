@@ -25,21 +25,34 @@ function collector() {
 async function loadCriticAgent({
   hasAny,
   routeChat,
+  target = { provider: "anthropic", model: "claude-sonnet-4-5", rationale: "test" },
+  openaiConfigured = false,
+  openaiToolRunner,
 }: {
   hasAny: boolean;
   routeChat: ReturnType<typeof vi.fn>;
+  target?: { provider: "openai" | "anthropic" | "google"; model: string; rationale: string };
+  openaiConfigured?: boolean;
+  openaiToolRunner?: ReturnType<typeof vi.fn>;
 }) {
   vi.doMock("../providers", () => ({
     hasAnyProvider: () => hasAny,
+    providers: {
+      openai: { id: "openai", isConfigured: () => openaiConfigured, chat: vi.fn(), chatStream: vi.fn() },
+      anthropic: { id: "anthropic", isConfigured: () => true, chat: vi.fn(), chatStream: vi.fn() },
+      google: { id: "google", isConfigured: () => true, chat: vi.fn(), chatStream: vi.fn() },
+    },
   }));
   vi.doMock("../router", () => ({
     routeChat,
-    routeDecision: vi.fn().mockReturnValue({
-      task: "critique",
-      target: { provider: "openai", model: "gpt-4o", rationale: "test" },
-      isPreferred: true,
-    }),
+    routeDecision: vi.fn().mockReturnValue({ task: "critique", target, isPreferred: true }),
   }));
+  if (openaiToolRunner) {
+    vi.doMock("../providers/openai-tools", () => ({
+      openaiChatWithTools: openaiToolRunner,
+    }));
+  }
+  vi.doMock("../usage", () => ({ recordModelCall: vi.fn().mockResolvedValue(undefined) }));
   vi.resetModules();
   const mod = await import("./critic-agent");
   return mod.criticAgent;
@@ -48,6 +61,8 @@ async function loadCriticAgent({
 afterEach(() => {
   vi.doUnmock("../providers");
   vi.doUnmock("../router");
+  vi.doUnmock("../providers/openai-tools");
+  vi.doUnmock("../usage");
   vi.resetModules();
 });
 
@@ -134,6 +149,97 @@ describe("criticAgent", () => {
       (e) => e.type === "agent_progress" && /network/i.test(e.message),
     );
     expect(err).toBeDefined();
+  });
+
+  describe("tool-use path (OpenAI)", () => {
+    it("invokes openaiChatWithTools when OpenAI is the target and returns toolCalls", async () => {
+      const toolCalls = [
+        {
+          name: "listExistingTicketTitles",
+          args: { limit: 50 },
+          resultPreview: '{"count":0,"titles":[]}',
+          durationMs: 12,
+        },
+      ];
+      const toolRunner = vi.fn(async (params: { onToolCall?: (r: unknown) => void }) => {
+        params.onToolCall?.(toolCalls[0]);
+        return {
+          text: JSON.stringify({
+            verdict: "approved_with_notes",
+            summary: "looks fine",
+            notes: [{ field: "general", severity: "info", message: "nit" }],
+          }),
+          model: "gpt-4o",
+          provider: "openai",
+          usage: { inputTokens: 123, outputTokens: 45 },
+          toolCalls,
+        };
+      });
+      const routeChat = vi.fn();
+      const agent = await loadCriticAgent({
+        hasAny: true,
+        routeChat,
+        target: { provider: "openai", model: "gpt-4o", rationale: "t" },
+        openaiConfigured: true,
+        openaiToolRunner: toolRunner,
+      });
+      const { events, emit } = collector();
+      const report = await agent.run(DRAFT, { emit });
+      expect(toolRunner).toHaveBeenCalledTimes(1);
+      expect(routeChat).not.toHaveBeenCalled();
+      expect(report.verdict).toBe("approved_with_notes");
+      expect(report.toolCalls).toHaveLength(1);
+      expect(report.toolCalls?.[0].name).toBe("listExistingTicketTitles");
+      const toolMsg = events.find(
+        (e) => e.type === "agent_progress" && /listExistingTicketTitles/.test(e.message),
+      );
+      expect(toolMsg).toBeDefined();
+    });
+
+    it("falls back to plain routeChat if the tool-use path throws", async () => {
+      const toolRunner = vi.fn().mockRejectedValue(new Error("tool loop boom"));
+      const routeChat = vi.fn().mockResolvedValue({
+        text: JSON.stringify({
+          verdict: "approved",
+          summary: "ok",
+          notes: [{ field: "general", severity: "info", message: "nit" }],
+        }),
+      });
+      const agent = await loadCriticAgent({
+        hasAny: true,
+        routeChat,
+        target: { provider: "openai", model: "gpt-4o", rationale: "t" },
+        openaiConfigured: true,
+        openaiToolRunner: toolRunner,
+      });
+      const { events, emit } = collector();
+      const report = await agent.run(DRAFT, { emit });
+      expect(toolRunner).toHaveBeenCalledTimes(1);
+      expect(routeChat).toHaveBeenCalledTimes(1);
+      expect(report.verdict).toBe("approved");
+      const progress = events.find(
+        (e) => e.type === "agent_progress" && /tool-use path failed/i.test(e.message),
+      );
+      expect(progress).toBeDefined();
+    });
+
+    it("does not invoke tool-use when OpenAI is not configured even if target is openai", async () => {
+      const toolRunner = vi.fn();
+      const routeChat = vi.fn().mockResolvedValue({
+        text: JSON.stringify({ verdict: "approved", summary: "ok", notes: [] }),
+      });
+      const agent = await loadCriticAgent({
+        hasAny: true,
+        routeChat,
+        target: { provider: "openai", model: "gpt-4o", rationale: "t" },
+        openaiConfigured: false,
+        openaiToolRunner: toolRunner,
+      });
+      const { emit } = collector();
+      await agent.run(DRAFT, { emit });
+      expect(toolRunner).not.toHaveBeenCalled();
+      expect(routeChat).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("emits a progress event summarizing the verdict on success", async () => {

@@ -131,6 +131,87 @@ describe("ticketWriterAgent", () => {
     expect(progress).toBeDefined();
   });
 
+  it("revision mode: includes previous draft and critique notes in the user payload and switches the system prompt", async () => {
+    const payloadStr = JSON.stringify(VALID_PAYLOAD);
+    let capturedMessages: Array<{ role: string; content: string }> | null = null;
+    const routeChatStream = vi.fn().mockImplementation(
+      async (
+        req: { messages: Array<{ role: string; content: string }> },
+        onDelta: (d: string) => void,
+      ) => {
+        capturedMessages = req.messages;
+        onDelta(payloadStr);
+        return { text: payloadStr, model: "claude-sonnet-4-5", provider: "anthropic" };
+      },
+    );
+    const agent = await loadTicketWriter({ hasAny: true, routeChatStream });
+    const { emit } = collector();
+    await agent.run(
+      {
+        idea: "ship it",
+        context: { raw: null as never, brief: "brief" },
+        revision: {
+          iteration: 2,
+          previousDraft: VALID_PAYLOAD,
+          critique: {
+            verdict: "needs_revision",
+            summary: "missing rate-limit handling",
+            notes: [
+              {
+                field: "edgeCases",
+                severity: "blocker",
+                message: "no rate-limit edge case",
+                suggestion: "add one",
+              },
+            ],
+          },
+        },
+      },
+      { emit },
+    );
+
+    expect(capturedMessages).not.toBeNull();
+    const systemMsg = capturedMessages!.find((m) => m.role === "system")!;
+    const userMsg = capturedMessages!.find((m) => m.role === "user")!;
+    expect(systemMsg.content).toMatch(/REVISION MODE/);
+
+    const parsed = JSON.parse(userMsg.content) as Record<string, unknown>;
+    expect(parsed.mode).toBe("revision");
+    expect(parsed.revisionIteration).toBe(2);
+    expect(parsed.criticVerdict).toBe("needs_revision");
+    expect(Array.isArray(parsed.criticNotes)).toBe(true);
+    expect((parsed.criticNotes as unknown[])[0]).toMatchObject({
+      field: "edgeCases",
+      severity: "blocker",
+    });
+    expect(parsed.previousDraft).toMatchObject({ ticket: { title: "Feature X" } });
+  });
+
+  it("initial pass: does NOT include revision hints in the user payload", async () => {
+    const payloadStr = JSON.stringify(VALID_PAYLOAD);
+    let capturedUserContent = "";
+    const routeChatStream = vi.fn().mockImplementation(
+      async (
+        req: { messages: Array<{ role: string; content: string }> },
+        onDelta: (d: string) => void,
+      ) => {
+        capturedUserContent = req.messages.find((m) => m.role === "user")!.content;
+        onDelta(payloadStr);
+        return { text: payloadStr, model: "x", provider: "anthropic" };
+      },
+    );
+    const agent = await loadTicketWriter({ hasAny: true, routeChatStream });
+    const { emit } = collector();
+    await agent.run(
+      { idea: "ship it", context: { raw: null as never, brief: "b" } },
+      { emit },
+    );
+    const parsed = JSON.parse(capturedUserContent) as Record<string, unknown>;
+    expect(parsed.mode).toBeUndefined();
+    expect(parsed.previousDraft).toBeUndefined();
+    expect(parsed.criticNotes).toBeUndefined();
+  });
+
   it("falls back to demo payload when the stream call throws", async () => {
     const routeChatStream = vi.fn().mockRejectedValue(new Error("connection"));
     const agent = await loadTicketWriter({ hasAny: true, routeChatStream });

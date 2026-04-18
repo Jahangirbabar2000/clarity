@@ -20,11 +20,32 @@ import type { Agent, AgentContext } from "./base";
 import { runAgent } from "./base";
 import type { BuildTicketPayload, GeneratedSubtask, GeneratedTicket } from "@/types/api";
 import type { ContextAgentOutput } from "./context-agent";
+import type { CritiqueReport } from "./critic-agent";
 
 export interface TicketWriterInput {
   idea: string;
   context: ContextAgentOutput;
+  /**
+   * When set, the writer is running in *revision mode*: it will rewrite the
+   * previous draft to address the Critic's notes instead of starting from
+   * scratch. Set by the pipeline's reflection loop.
+   */
+  revision?: {
+    previousDraft: BuildTicketPayload;
+    critique: CritiqueReport;
+    iteration: number;
+  };
 }
+
+const REVISION_SYSTEM_ADDENDUM = `
+
+You are now in REVISION MODE. A previous version of this ticket was just reviewed by another agent (the Critic). Your job is to produce a revised draft that directly addresses every blocker and warning the Critic raised, while preserving the parts the Critic did not flag.
+
+Rules for revision mode:
+- Output the FULL revised ticket (title, description, acceptanceCriteria, edgeCases, outOfScope, type, priority, storyPoints, suggestedLabels, subtasks) — not a diff.
+- For each Critic note, either (a) fix it in the relevant field, or (b) explain in \`description\` why you disagree. Do not silently ignore blockers.
+- Do NOT weaken acceptance criteria or delete edge cases to "pass" the Critic. Tighten them instead.
+- Keep subtask IDs stable where possible by reusing the same \`title\` when the subtask is unchanged — only rename if the scope genuinely shifted.`;
 
 export const TICKET_WRITER_DEMO_FALLBACK: BuildTicketPayload = {
   ticket: {
@@ -136,11 +157,20 @@ const TASK: TaskType = "creative_longform";
 
 /** Build the user-message payload handed to the writer model. */
 function buildUserPayload(input: TicketWriterInput): string {
-  return JSON.stringify({
+  const base: Record<string, unknown> = {
     idea: input.idea,
     brief: input.context.brief,
     context: input.context.raw,
-  });
+  };
+  if (input.revision) {
+    base.mode = "revision";
+    base.revisionIteration = input.revision.iteration;
+    base.previousDraft = input.revision.previousDraft;
+    base.criticNotes = input.revision.critique.notes;
+    base.criticVerdict = input.revision.critique.verdict;
+    base.criticSummary = input.revision.critique.summary;
+  }
+  return JSON.stringify(base);
 }
 
 export const ticketWriterAgent: Agent<TicketWriterInput, BuildTicketPayload> = {
@@ -157,12 +187,13 @@ export const ticketWriterAgent: Agent<TicketWriterInput, BuildTicketPayload> = {
       }
     }
 
+    const revisionLabel = input.revision ? ` (revision ${input.revision.iteration})` : "";
     return runAgent(
       this,
       target,
       target
-        ? `Writing ticket with ${providerLabel(target.provider)} ${target.model}…`
-        : "No LLM configured — using demo fallback ticket…",
+        ? `Writing ticket${revisionLabel} with ${providerLabel(target.provider)} ${target.model}…`
+        : `No LLM configured — using demo fallback ticket${revisionLabel}…`,
       ctx,
       async () => {
         if (!hasAnyProvider()) {
@@ -178,17 +209,29 @@ export const ticketWriterAgent: Agent<TicketWriterInput, BuildTicketPayload> = {
           return TICKET_WRITER_DEMO_FALLBACK;
         }
 
+        const systemPrompt = input.revision
+          ? TICKET_BUILDER_SYSTEM_PROMPT + REVISION_SYSTEM_ADDENDUM
+          : TICKET_BUILDER_SYSTEM_PROMPT;
+
         let full = "";
         try {
           const resp = await routeChatStream(
             {
               task: TASK,
               messages: [
-                { role: "system", content: TICKET_BUILDER_SYSTEM_PROMPT },
+                { role: "system", content: systemPrompt },
                 { role: "user", content: buildUserPayload(input) },
               ],
               maxTokens: 4000,
               temperature: 0.4,
+              meta: { agent: this.name, orgId: ctx.orgId },
+              onFallback: (failure, next) => {
+                ctx.emit({
+                  type: "agent_progress",
+                  agent: this.name,
+                  message: `${providerLabel(failure.target.provider)} ${failure.target.model} failed (${failure.error.message}); falling back to ${providerLabel(next.provider)} ${next.model}…`,
+                });
+              },
             },
             (delta) => {
               full += delta;

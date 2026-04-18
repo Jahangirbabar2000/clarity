@@ -36,6 +36,10 @@ Rules:
 - No bullet-point soup: prose paragraphs the Writer can scan in under 10 seconds.
 - No preamble, no headers, no markdown code fences. Start directly with the first paragraph.`;
 
+function providerLabel(id: "openai" | "anthropic" | "google"): string {
+  return id === "openai" ? "OpenAI" : id === "anthropic" ? "Claude" : "Gemini";
+}
+
 export const contextAgent: Agent<string, ContextAgentOutput> = {
   name: "ContextAgent",
   role: "Aggregates RAG context from GitHub, Jira, Notion, PRDs, and existing tickets",
@@ -77,6 +81,14 @@ export const contextAgent: Agent<string, ContextAgentOutput> = {
             ],
             maxTokens: 1000,
             temperature: 0.2,
+            meta: { agent: this.name, orgId: ctx.orgId ?? orgId },
+            onFallback: (failure, next) => {
+              ctx.emit({
+                type: "agent_progress",
+                agent: this.name,
+                message: `${providerLabel(failure.target.provider)} ${failure.target.model} failed (${failure.error.message}); retrying with ${providerLabel(next.provider)} ${next.model}…`,
+              });
+            },
           });
           return { raw, brief: resp.text.trim() };
         } catch (err) {

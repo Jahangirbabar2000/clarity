@@ -101,6 +101,14 @@ export const healthAnalystAgent: Agent<HealthAnalystInput, InsightPayload[]> = {
             ],
             maxTokens: 1500,
             temperature: 0.3,
+            meta: { agent: this.name, orgId: ctx.orgId ?? input.org },
+            onFallback: (failure, next) => {
+              ctx.emit({
+                type: "agent_progress",
+                agent: this.name,
+                message: `${providerLabel(failure.target.provider)} ${failure.target.model} failed (${failure.error.message}); retrying with ${providerLabel(next.provider)} ${next.model}…`,
+              });
+            },
           });
           const parsed = JSON.parse(stripJsonFences(resp.text));
           if (!Array.isArray(parsed)) throw new Error("not array");

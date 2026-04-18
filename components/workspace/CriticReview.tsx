@@ -6,7 +6,7 @@
  * which parts of the draft a senior-reviewer-style LLM flagged.
  */
 
-import { ShieldCheck, AlertTriangle, Info, OctagonX } from "lucide-react";
+import { ShieldCheck, AlertTriangle, Info, OctagonX, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CritiqueReport, CritiqueSeverity } from "@/types/agents";
 
@@ -59,6 +59,28 @@ export function CriticReview({ critique }: { critique: CritiqueReport }) {
             </span>
           </div>
           <p className="mt-1 text-sm">{critique.summary}</p>
+          {critique.toolCalls && critique.toolCalls.length > 0 ? (
+            <div className="mt-3 rounded-md border border-dashed bg-white/60 p-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                <Wrench className="h-3 w-3" />
+                Tool calls ({critique.toolCalls.length})
+              </div>
+              <ul className="mt-1 space-y-1">
+                {critique.toolCalls.map((tc, i) => (
+                  <li key={i} className="text-[11px] text-muted-foreground">
+                    <code className="rounded bg-muted/60 px-1 py-0.5">
+                      {tc.name}({Object.keys(tc.args).length ? JSON.stringify(tc.args) : ""})
+                    </code>{" "}
+                    <span className="opacity-70">→ {tc.resultPreview.slice(0, 160)}{tc.resultPreview.length > 160 ? "…" : ""}</span>
+                    {tc.error ? (
+                      <span className="ml-1 text-red-600">error: {tc.error}</span>
+                    ) : null}
+                    <span className="ml-1 opacity-60">({tc.durationMs}ms)</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {critique.notes.length > 0 ? (
             <ul className="mt-3 space-y-2">
               {critique.notes.map((n, i) => {

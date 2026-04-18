@@ -44,10 +44,29 @@ export type AgentEvent =
       type: "agent_error";
       agent: string;
       message: string;
+    }
+  | {
+      /**
+       * Pipeline-level event emitted when the Critic's verdict triggers the
+       * reflection loop (Writer ↻ Critic). Not an agent lifecycle event —
+       * emitted by the orchestrator itself so the UI can render the loop
+       * as a distinct timeline element.
+       */
+      type: "reflection";
+      iteration: number;
+      maxIterations: number;
+      verdict: "approved" | "approved_with_notes" | "needs_revision";
+      message: string;
     };
 
 export interface AgentContext {
   emit: (event: AgentEvent) => void;
+  /**
+   * Org scope for this run, threaded through from the API layer. Agents pass
+   * it to the router so every LLM call is tagged with orgId in the ModelCall
+   * ledger, which lets Settings > AI Usage scope breakdowns per organization.
+   */
+  orgId?: string;
 }
 
 export interface AgentMeta {
