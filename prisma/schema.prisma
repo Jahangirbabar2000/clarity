@@ -259,3 +259,26 @@ model AIInsight {
   createdAt      DateTime     @default(now())
   org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
+
+/// Append-only ledger of every LLM call the router makes. Used for the
+/// Settings > AI Usage panel (tokens + estimated cost per agent/provider/task)
+/// and for retroactive analysis of which routes actually get hit.
+model ModelCall {
+  id              String   @id @default(cuid())
+  orgId           String?  // optional — some calls happen outside an org scope
+  task            String   // TaskType value (e.g. "creative_longform")
+  agent           String?  // agent name (e.g. "TicketWriterAgent") when known
+  provider        String   // "openai" | "anthropic" | "google"
+  model           String   // concrete model id (e.g. "gpt-4o")
+  inputTokens     Int?
+  outputTokens    Int?
+  estimatedCostUsd Float?
+  durationMs      Int
+  success         Boolean
+  wasFallback     Boolean  @default(false)
+  errorMessage    String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([createdAt])
+}

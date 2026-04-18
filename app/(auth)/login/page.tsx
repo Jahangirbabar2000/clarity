@@ -17,7 +17,7 @@ export default function LoginPage() {
           <CardDescription>AI-powered engineering intelligence</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Button onClick={() => signIn("github", { callbackUrl: "/" })} className="w-full">
+          <Button onClick={() => signIn("github", { callbackUrl: "/overview" })} className="w-full">
             <Github className="h-4 w-4" /> Continue with GitHub
           </Button>
           <p className="text-center text-xs text-muted-foreground">

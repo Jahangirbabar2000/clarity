@@ -7,3 +7,5 @@ out
 *.log
 .DS_Store
 prisma/migrations/dev.db*
+coverage
+.vitest

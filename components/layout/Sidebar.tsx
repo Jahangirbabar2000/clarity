@@ -6,7 +6,7 @@ import { Activity, Home, Lightbulb, Settings, Sparkles, Layers, ClipboardList } 
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/", label: "Overview", icon: Home },
+  { href: "/overview", label: "Overview", icon: Home },
   { href: "/health", label: "Health", icon: Activity },
   { href: "/insights", label: "Insights", icon: Lightbulb },
   { href: "/workspace", label: "Workspace", icon: ClipboardList },
@@ -18,15 +18,15 @@ export function Sidebar() {
   const pathname = usePathname();
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-card md:flex md:flex-col">
-      <div className="flex h-14 items-center gap-2 border-b px-4 font-semibold">
+      <Link href="/" className="flex h-14 items-center gap-2 border-b px-4 font-semibold">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Sparkles className="h-4 w-4" />
         </div>
         Clarity
-      </div>
+      </Link>
       <nav className="flex flex-col gap-0.5 p-2">
         {NAV.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const active = pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
@@ -51,7 +51,7 @@ export function MobileTabBar() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-card md:hidden">
       {NAV.filter((n) => n.href !== "/settings").map((item) => {
-        const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        const active = pathname.startsWith(item.href);
         return (
           <Link
             key={item.href}

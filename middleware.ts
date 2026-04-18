@@ -11,6 +11,8 @@ const DEMO_MODE =
 const authMiddleware = withAuth({ pages: { signIn: "/login" } });
 
 export default function middleware(req: NextRequest) {
+  // The public landing page (/) is always accessible, even in auth mode.
+  if (req.nextUrl.pathname === "/") return NextResponse.next();
   if (DEMO_MODE) return NextResponse.next();
   // @ts-expect-error withAuth returns an augmented middleware
   return authMiddleware(req);

@@ -1,14 +1,25 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { ensureDemoOrg } from "@/lib/db/queries";
-import { assembleContext } from "@/lib/context/context-assembler";
-import { buildTicketStream } from "@/lib/ai/ticket-builder";
+import { runBuildTicketPipeline } from "@/lib/ai/pipeline";
+import type { AgentEvent } from "@/lib/ai/agents";
 
 const body = z.object({ idea: z.string().min(1), orgId: z.string().optional() });
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
+/**
+ * Streaming SSE endpoint for the multi-agent ticket pipeline.
+ *
+ * Event kinds sent to the client:
+ *   - { phase: "context" | "context_ready" | "generating" | "chunk" | "done" | "error", ... }
+ *       Legacy events kept for backwards compatibility with the existing UI.
+ *   - { agent_event: AgentEvent }
+ *       Per-agent lifecycle events from the pipeline (start / progress / stream /
+ *       done / error), used by the UI telemetry panel to render a live
+ *       agent-by-agent timeline with model + provider labels.
+ */
 export async function POST(req: Request) {
   const parsed = body.safeParse(await req.json());
   if (!parsed.success) {
@@ -16,7 +27,9 @@ export async function POST(req: Request) {
   }
   const { idea, orgId } = parsed.data;
 
-  const org = orgId ? await prisma.organization.findUnique({ where: { id: orgId } }) : await ensureDemoOrg();
+  const org = orgId
+    ? await prisma.organization.findUnique({ where: { id: orgId } })
+    : await ensureDemoOrg();
   if (!org) return new Response(JSON.stringify({ error: "Org not found" }), { status: 404 });
 
   const encoder = new TextEncoder();
@@ -26,43 +39,56 @@ export async function POST(req: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      try {
-        send(controller, { phase: "context", message: "Assembling context from your connected sources…" });
-        const ctx = await assembleContext(org.id);
+      const emit = (event: AgentEvent) => {
+        send(controller, { agent_event: event });
 
+        // Translate agent events into the legacy phase events the existing UI listens for,
+        // so the current IdeaInput / TicketEditor progress strings keep working unchanged.
+        if (event.type === "agent_start") {
+          if (event.agent === "ContextAgent") {
+            send(controller, { phase: "context", message: event.message });
+          } else if (event.agent === "TicketWriterAgent") {
+            send(controller, { phase: "generating", message: event.message });
+          }
+        }
+        if (event.type === "agent_stream" && event.agent === "TicketWriterAgent") {
+          send(controller, { phase: "chunk", text: event.text });
+        }
+      };
+
+      try {
+        const { context, draft, critique, iterations, critiqueHistory } =
+          await runBuildTicketPipeline(idea, org.id, emit);
+
+        // Surface the context snapshot the old UI expects.
         send(controller, {
           phase: "context_ready",
-          sources: ctx.sources,
-          techStack: ctx.techStack,
-          files: ctx.relevantFiles.map((f) => f.path),
+          sources: context.raw.sources,
+          techStack: context.raw.techStack,
+          files: context.raw.relevantFiles.map((f) => f.path),
+          brief: context.brief,
         });
 
-        send(controller, { phase: "generating", message: "Writing ticket with Claude…" });
-
-        const payload = await buildTicketStream(idea, ctx, (chunk) => {
-          send(controller, { phase: "chunk", text: chunk });
-        });
-
-        const activeSources = Object.entries(ctx.sources)
+        const activeSources = Object.entries(context.raw.sources)
           .filter(([, v]) => (typeof v === "number" ? v > 0 : v))
           .map(([k]) => k);
 
         const ticket = await prisma.ticket.create({
           data: {
             orgId: org.id,
-            title: payload.ticket.title,
-            description: payload.ticket.description,
-            acceptanceCriteria: payload.ticket.acceptanceCriteria,
-            edgeCases: payload.ticket.edgeCases,
-            outOfScope: payload.ticket.outOfScope,
-            type: payload.ticket.type,
-            priority: payload.ticket.priority,
-            storyPoints: payload.ticket.storyPoints,
-            suggestedLabels: payload.ticket.suggestedLabels,
+            title: draft.ticket.title,
+            description: draft.ticket.description,
+            acceptanceCriteria: draft.ticket.acceptanceCriteria,
+            edgeCases: draft.ticket.edgeCases,
+            outOfScope: draft.ticket.outOfScope,
+            type: draft.ticket.type,
+            priority: draft.ticket.priority,
+            storyPoints: draft.ticket.storyPoints,
+            suggestedLabels: draft.ticket.suggestedLabels,
             contextSources: activeSources,
             status: "DRAFT",
             subtasks: {
-              create: payload.subtasks.map((s, i) => ({
+              create: draft.subtasks.map((s, i) => ({
                 title: s.title,
                 description: s.description,
                 type: s.type,
@@ -77,9 +103,30 @@ export async function POST(req: Request) {
           include: { subtasks: { orderBy: { order: "asc" } } },
         });
 
-        send(controller, { phase: "done", ticketId: ticket.id, ticket });
+        send(controller, {
+          phase: "done",
+          ticketId: ticket.id,
+          ticket,
+          critique,
+          iterations,
+          critiqueHistory,
+        });
+        // Typed terminal event (new, unambiguous). The legacy `phase: "done"` above
+        // stays for backwards compatibility with older UI code.
+        send(controller, {
+          pipeline_event: {
+            type: "pipeline_complete",
+            ticketId: ticket.id,
+            iterations,
+            verdict: critique.verdict,
+          },
+        });
       } catch (err) {
-        send(controller, { phase: "error", message: err instanceof Error ? err.message : "unknown error" });
+        const message = err instanceof Error ? err.message : "unknown error";
+        send(controller, { phase: "error", message });
+        send(controller, {
+          pipeline_event: { type: "pipeline_failed", message },
+        });
       } finally {
         controller.close();
       }

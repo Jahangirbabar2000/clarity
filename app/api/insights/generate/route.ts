@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { ensureDemoOrg } from "@/lib/db/queries";
-import { generateInsights } from "@/lib/ai/insights-generator";
+import { healthAnalystAgent, type AgentEvent } from "@/lib/ai/agents";
 import { getQAPassRate, getBugReopenRate, getSprintVelocity } from "@/lib/integrations/jira";
 import { getPRCycleTime, getLibraryHealth } from "@/lib/integrations/github";
 import { getTopErrors } from "@/lib/integrations/sentry";
@@ -30,39 +30,46 @@ export async function POST(req: Request) {
     getTopErrors(org.sentryOrg ?? "demo", "demo"),
   ]);
 
-  const insights = await generateInsights({
-    org: org.name,
-    period: "last 8 sprints",
-    metrics: {
-      qaPassRate: {
-        current: qa.current,
-        previous: qa.previous,
-        trend: qa.trend.map((t) => t.value),
+  const agentTrace: AgentEvent[] = [];
+  const insights = await healthAnalystAgent.run(
+    {
+      org: org.name,
+      period: "last 8 sprints",
+      metrics: {
+        qaPassRate: {
+          current: qa.current,
+          previous: qa.previous,
+          trend: qa.trend.map((t) => t.value),
+        },
+        bugReopenRate: {
+          current: bug.current,
+          previous: bug.previous,
+          trend: bug.trend.map((t) => t.value),
+        },
+        prCycleTime: {
+          current: pr.current,
+          unit: "days",
+          trend: pr.trend.map((t) => t.value),
+        },
+        buildFailureRate: {
+          current: mockBuildHealth.current,
+          previous: mockBuildHealth.previous,
+        },
+        libraryHealth: {
+          upToDate: lib.upToDate,
+          minorUpdates: lib.minorUpdates,
+          criticalCVEs: lib.criticalCVEs,
+        },
+        velocity: {
+          committed: velocity.committed,
+          delivered: velocity.delivered,
+          trend: velocity.trend,
+        },
+        topErrors,
       },
-      bugReopenRate: {
-        current: bug.current,
-        previous: bug.previous,
-        trend: bug.trend.map((t) => t.value),
-      },
-      prCycleTime: {
-        current: pr.current,
-        unit: "days",
-        trend: pr.trend.map((t) => t.value),
-      },
-      buildFailureRate: { current: mockBuildHealth.current, previous: mockBuildHealth.previous },
-      libraryHealth: {
-        upToDate: lib.upToDate,
-        minorUpdates: lib.minorUpdates,
-        criticalCVEs: lib.criticalCVEs,
-      },
-      velocity: {
-        committed: velocity.committed,
-        delivered: velocity.delivered,
-        trend: velocity.trend,
-      },
-      topErrors,
     },
-  });
+    { emit: (e) => agentTrace.push(e) },
+  );
 
   const saved = await prisma.$transaction(
     insights.map((i) =>
@@ -79,7 +86,7 @@ export async function POST(req: Request) {
     ),
   );
 
-  return NextResponse.json({ insights: saved });
+  return NextResponse.json({ insights: saved, agentTrace });
 }
 
 export async function GET(req: Request) {

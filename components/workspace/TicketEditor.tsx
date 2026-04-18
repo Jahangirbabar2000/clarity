@@ -12,10 +12,12 @@ import { SubtaskEditor, type SubtaskDraft } from "./SubtaskEditor";
 import { SprintAssigner } from "./SprintAssigner";
 import { ContextPanel, type ContextSummary } from "./ContextPanel";
 import { PushToJiraButton } from "./PushToJiraButton";
+import { CriticReview } from "./CriticReview";
 import { Button } from "@/components/ui/button";
 import { formatRelative } from "@/lib/utils";
 import { useAutoSaveTicket } from "@/lib/hooks/useAutoSaveTicket";
 import type { TicketWithRelations } from "@/types/models";
+import type { CritiqueReport } from "@/types/agents";
 import { Loader2, Check, AlertCircle } from "lucide-react";
 
 type Priority = "HIGH" | "MED" | "LOW";
@@ -62,9 +64,11 @@ function fromTicket(t: TicketWithRelations): Draft {
 export function TicketEditor({
   ticket,
   contextSummary,
+  critique,
 }: {
   ticket: TicketWithRelations;
   contextSummary?: ContextSummary;
+  critique?: CritiqueReport;
 }) {
   const [draft, setDraft] = useState<Draft>(() => fromTicket(ticket));
   const [refiningField, setRefiningField] = useState<string | null>(null);
@@ -160,6 +164,7 @@ export function TicketEditor({
   return (
     <div className="space-y-4 pb-24">
       {contextSummary ? <ContextPanel summary={contextSummary} /> : null}
+      {critique ? <CriticReview critique={critique} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
