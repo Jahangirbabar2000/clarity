@@ -1,0 +1,261 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----- Auth (NextAuth) -----
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  orgMemberships OrgMember[]
+  tickets       Ticket[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+// ----- Core domain -----
+
+enum IntegrationType {
+  GITHUB
+  JIRA
+  SENTRY
+  DATADOG
+  NOTION
+  CI
+  PRD_UPLOAD
+}
+
+enum TicketType {
+  FEATURE
+  BUG
+  IMPROVEMENT
+  SPIKE
+}
+
+enum TicketStatus {
+  DRAFT
+  REVIEWED
+  PUSHED
+}
+
+enum Priority {
+  HIGH
+  MED
+  LOW
+}
+
+enum SubtaskType {
+  FRONTEND
+  BACKEND
+  DATABASE
+  TESTING
+  INFRA
+  DEVOPS
+  PM
+}
+
+enum MetricType {
+  QA_PASS_RATE
+  BUG_REOPEN_RATE
+  PR_CYCLE_TIME
+  BUILD_FAILURE_RATE
+  LIBRARY_HEALTH
+  VELOCITY
+  P95_LATENCY
+  ERROR_RATE
+}
+
+enum InsightType {
+  ANOMALY
+  TREND
+  RECOMMENDATION
+  SUMMARY
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model Organization {
+  id              String        @id @default(cuid())
+  name            String
+  githubOrgName   String?
+  jiraDomain      String?
+  jiraProjectKey  String?
+  sentryOrg       String?
+  notionWorkspace String?
+  createdAt       DateTime      @default(now())
+  integrations    Integration[]
+  tickets         Ticket[]
+  metrics         MetricSnapshot[]
+  insights        AIInsight[]
+  sprints         Sprint[]
+  members         OrgMember[]
+  uploads         PrdUpload[]
+}
+
+model OrgMember {
+  id     String @id @default(cuid())
+  orgId  String
+  userId String
+  role   String @default("MEMBER")
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([orgId, userId])
+}
+
+model Integration {
+  id           String          @id @default(cuid())
+  orgId        String
+  type         IntegrationType
+  accessToken  String          @db.Text
+  refreshToken String?         @db.Text
+  meta         Json?
+  connectedAt  DateTime        @default(now())
+  lastSyncedAt DateTime?
+  org          Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  @@unique([orgId, type])
+}
+
+model PrdUpload {
+  id         String   @id @default(cuid())
+  orgId      String
+  filename   String
+  mimeType   String
+  extracted  String   @db.Text
+  uploadedAt DateTime @default(now())
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model Ticket {
+  id                 String    @id @default(cuid())
+  orgId              String
+  jiraId             String?
+  jiraUrl            String?
+  title              String
+  description        String    @db.Text
+  acceptanceCriteria String[]
+  edgeCases          String[]
+  outOfScope         String[]
+  type               TicketType
+  status             TicketStatus @default(DRAFT)
+  storyPoints        Int?
+  priority           Priority     @default(MED)
+  contextSources     String[]
+  suggestedLabels    String[]
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  subtasks           Subtask[]
+  sprintAssignments  SprintAssignment[]
+  org                Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy          User?       @relation(fields: [createdById], references: [id])
+}
+
+model Subtask {
+  id           String   @id @default(cuid())
+  ticketId     String
+  jiraId       String?
+  jiraUrl      String?
+  title        String
+  description  String   @db.Text
+  type         SubtaskType
+  storyPoints  Int
+  priority     Priority @default(MED)
+  dependsOn    String[]
+  suggestedSprint Int?
+  order        Int
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sprintAssignment SprintAssignment?
+}
+
+model Sprint {
+  id              String   @id @default(cuid())
+  orgId           String
+  name            String
+  goal            String
+  startDate       DateTime?
+  endDate         DateTime?
+  committedPoints Int       @default(0)
+  deliveredPoints Int       @default(0)
+  velocityTarget  Int
+  order           Int
+  assignments     SprintAssignment[]
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model SprintAssignment {
+  id        String  @id @default(cuid())
+  subtaskId String  @unique
+  sprintId  String
+  ticketId  String
+  subtask   Subtask @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
+  sprint    Sprint  @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  ticket    Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model MetricSnapshot {
+  id          String     @id @default(cuid())
+  orgId       String
+  metricType  MetricType
+  value       Float
+  metadata    Json?
+  recordedAt  DateTime   @default(now())
+  sprintId    String?
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model AIInsight {
+  id             String       @id @default(cuid())
+  orgId          String
+  type           InsightType
+  severity       Severity
+  title          String
+  body           String       @db.Text
+  relatedMetric  String?
+  acknowledged   Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
