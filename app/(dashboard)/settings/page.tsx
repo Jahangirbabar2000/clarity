@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Github, BookOpen, FileText, Database, AlertCircle, Activity, Upload } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
+import { AIRoutingPanel } from "@/components/settings/AIRoutingPanel";
 import type { IntegrationStatus } from "@/types/api";
 
 type IntegrationKey = IntegrationStatus["type"];
@@ -44,7 +45,9 @@ export default function SettingsPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <AIRoutingPanel />
+
       <div>
         <h2 className="text-xl font-semibold">Integrations</h2>
         <p className="text-sm text-muted-foreground">Connect the sources Clarity reads to build tickets and compute metrics.</p>
