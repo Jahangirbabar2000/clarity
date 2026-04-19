@@ -29,4 +29,4 @@ export function pct(n: number | null | undefined) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
-export const USE_MOCKS = process.env.CLARITY_USE_MOCKS !== "false";
+export const USE_MOCKS = process.env.CLARITY_USE_MOCKS === "true";

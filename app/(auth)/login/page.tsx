@@ -1,11 +1,16 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Github, Sparkles } from "lucide-react";
+import { Github, Sparkles, Zap } from "lucide-react";
+
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
       <Card className="w-full max-w-md">
@@ -17,12 +22,29 @@ export default function LoginPage() {
           <CardDescription>AI-powered engineering intelligence</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Button onClick={() => signIn("github", { callbackUrl: "/overview" })} className="w-full">
-            <Github className="h-4 w-4" /> Continue with GitHub
+          <Button onClick={() => signIn("github", { callbackUrl: "/projects" })} className="w-full">
+            <Github className="h-4 w-4" /> Sign in with GitHub
           </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-muted"></span>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or</span>
+            </div>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={() => router.push("/")}
+            className="w-full"
+          >
+            <Zap className="h-4 w-4" /> Continue in Demo Mode
+          </Button>
+
           <p className="text-center text-xs text-muted-foreground">
-            Demo mode: you can also browse without auth when{" "}
-            <code className="rounded bg-muted px-1">CLARITY_USE_MOCKS=true</code>.
+            Demo mode uses realistic mock data — no integrations required.
           </p>
         </CardContent>
       </Card>

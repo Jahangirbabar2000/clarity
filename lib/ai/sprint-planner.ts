@@ -1,4 +1,4 @@
-import type { Subtask } from "@prisma/client";
+import type { Subtask, Sprint } from "@prisma/client";
 
 export type PlannedSprint = {
   order: number;
@@ -9,37 +9,59 @@ export type PlannedSprint = {
   subtasks: Subtask[];
 };
 
+export type ExistingSprintSlot = {
+  id: string;
+  order: number;
+  name: string;
+  velocityTarget: number;
+  committedPoints: number;
+};
+
 /**
- * Greedy topological pack: preserves dependsOn order and respects velocity cap.
- * No AI call required — deterministic, explainable, fast.
+ * Greedy topological pack across ALL subtasks from all tickets.
+ * Fills existing sprint capacity first, then creates new sprints.
  */
-export function planSprints(
-  subtasks: Subtask[],
+export function planSprintsForProject(
+  allSubtasks: Subtask[],
+  existingSprints: ExistingSprintSlot[],
   velocityPerSprint: number,
   sprintLengthWeeks: number,
 ): PlannedSprint[] {
-  const byTitle = new Map(subtasks.map((s) => [s.title, s]));
-  const indegree = new Map<string, number>();
+  const byTitle = new Map(allSubtasks.map((s) => [s.title, s]));
   const ready: Subtask[] = [];
 
-  for (const s of subtasks) {
+  for (const s of allSubtasks) {
     const blocking = s.dependsOn.filter((t) => byTitle.has(t)).length;
-    indegree.set(s.id, blocking);
     if (blocking === 0) ready.push(s);
   }
 
-  const sprints: PlannedSprint[] = [];
-  let sprintIdx = 0;
-  let current: PlannedSprint = makeSprint(sprintIdx++, velocityPerSprint, sprintLengthWeeks);
+  // Seed from existing sprints (carry over their used capacity)
+  const sprints: PlannedSprint[] = existingSprints
+    .sort((a, b) => a.order - b.order)
+    .map((s) => ({
+      order: s.order,
+      name: s.name,
+      goal: `Ship planned work — ${sprintLengthWeeks}-week cycle`,
+      velocityTarget: s.velocityTarget,
+      committedPoints: s.committedPoints,
+      subtasks: [],
+    }));
+
+  let sprintIdx = sprints.length;
+  const addSprint = () => {
+    const s = makeSprint(sprintIdx++, velocityPerSprint, sprintLengthWeeks);
+    sprints.push(s);
+    return s;
+  };
+
   const scheduled = new Set<string>();
 
   const tryPack = (s: Subtask) => {
-    if (current.committedPoints + s.storyPoints > current.velocityTarget && current.subtasks.length > 0) {
-      sprints.push(current);
-      current = makeSprint(sprintIdx++, velocityPerSprint, sprintLengthWeeks);
-    }
-    current.subtasks.push(s);
-    current.committedPoints += s.storyPoints;
+    // Find first sprint with remaining capacity
+    let target = sprints.find((sp) => sp.committedPoints + s.storyPoints <= sp.velocityTarget);
+    if (!target) target = addSprint();
+    target.subtasks.push(s);
+    target.committedPoints += s.storyPoints;
     scheduled.add(s.id);
   };
 
@@ -48,20 +70,26 @@ export function planSprints(
     const next = ready.shift()!;
     tryPack(next);
 
-    for (const child of subtasks) {
+    for (const child of allSubtasks) {
       if (scheduled.has(child.id)) continue;
       const blockers = child.dependsOn.map((t) => byTitle.get(t)).filter((b): b is Subtask => Boolean(b));
       const unresolved = blockers.filter((b) => !scheduled.has(b.id)).length;
-      indegree.set(child.id, unresolved);
       if (unresolved === 0 && !ready.find((r) => r.id === child.id)) ready.push(child);
     }
   }
 
-  // Any with broken deps — append.
-  for (const s of subtasks) if (!scheduled.has(s.id)) tryPack(s);
-  if (current.subtasks.length > 0) sprints.push(current);
+  for (const s of allSubtasks) if (!scheduled.has(s.id)) tryPack(s);
 
-  return sprints;
+  return sprints.filter((s) => s.subtasks.length > 0 || existingSprints.some((e) => e.order === s.order));
+}
+
+/** Legacy single-ticket planner kept for backwards compatibility. */
+export function planSprints(
+  subtasks: Subtask[],
+  velocityPerSprint: number,
+  sprintLengthWeeks: number,
+): PlannedSprint[] {
+  return planSprintsForProject(subtasks, [], velocityPerSprint, sprintLengthWeeks);
 }
 
 function makeSprint(order: number, velocity: number, weeks: number): PlannedSprint {

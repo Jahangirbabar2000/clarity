@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db/client";
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
   providers: [
     GitHubProvider({
       clientId: process.env.GITHUB_CLIENT_ID ?? "",
@@ -14,26 +14,13 @@ export const authOptions: NextAuthOptions = {
   ],
   pages: { signIn: "/login" },
   callbacks: {
-    async session({ session, user }) {
-      if (session.user) {
-        (session.user as { id?: string }).id = user.id;
+    async session({ session, token }) {
+      if (session.user && token.sub) {
+        (session.user as { id?: string }).id = token.sub;
       }
       return session;
     },
-    async signIn({ user }) {
-      if (!user.id) return true;
-      const hasOrg = await prisma.orgMember.findFirst({ where: { userId: user.id } });
-      if (!hasOrg) {
-        const org = await prisma.organization.create({
-          data: {
-            name: user.name ? `${user.name}'s Workspace` : "My Workspace",
-            jiraProjectKey: "CLAR",
-          },
-        });
-        await prisma.orgMember.create({
-          data: { orgId: org.id, userId: user.id, role: "OWNER" },
-        });
-      }
+    async signIn() {
       return true;
     },
   },

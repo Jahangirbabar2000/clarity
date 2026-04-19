@@ -9,7 +9,6 @@ import { Select } from "@/components/ui/select";
 import { EditableList } from "./EditableList";
 import { AIRefineButton } from "./AIRefineButton";
 import { SubtaskEditor, type SubtaskDraft } from "./SubtaskEditor";
-import { SprintAssigner } from "./SprintAssigner";
 import { ContextPanel, type ContextSummary } from "./ContextPanel";
 import { PushToJiraButton } from "./PushToJiraButton";
 import { CriticReview } from "./CriticReview";
@@ -18,7 +17,7 @@ import { formatRelative } from "@/lib/utils";
 import { useAutoSaveTicket } from "@/lib/hooks/useAutoSaveTicket";
 import type { TicketWithRelations } from "@/types/models";
 import type { CritiqueReport } from "@/types/agents";
-import { Loader2, Check, AlertCircle } from "lucide-react";
+import { Loader2, Check, AlertCircle, Layers } from "lucide-react";
 
 type Priority = "HIGH" | "MED" | "LOW";
 type TicketType = "FEATURE" | "BUG" | "IMPROVEMENT" | "SPIKE";
@@ -137,13 +136,16 @@ export function TicketEditor({
     }
   };
 
+  const [sprintAdded, setSprintAdded] = useState(false);
+
   const autoAssign = async () => {
     setRefiningField("sprints");
+    setSprintAdded(false);
     try {
       const r = await fetch("/api/workspace/build-sprint-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id, velocityPerSprint: 20, sprintLengthWeeks: 2 }),
+        body: JSON.stringify({ projectId: ticket.orgId, ticketId: ticket.id, velocityPerSprint: 20, sprintLengthWeeks: 2 }),
       });
       const data = await r.json();
       if (data.sprints) {
@@ -155,6 +157,7 @@ export function TicketEditor({
           ...prev,
           subtasks: prev.subtasks.map((s) => ({ ...s, suggestedSprint: map.get(s.id) ?? s.suggestedSprint ?? 1 })),
         }));
+        setSprintAdded(true);
       }
     } finally {
       setRefiningField(null);
@@ -165,6 +168,30 @@ export function TicketEditor({
     <div className="space-y-4 pb-24">
       {contextSummary ? <ContextPanel summary={contextSummary} /> : null}
       {critique ? <CriticReview critique={critique} /> : null}
+
+      {/* Sprint Plan Action Bar */}
+      <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-2.5">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Layers className="h-4 w-4" />
+          {sprintAdded
+            ? <span className="text-emerald-600 font-medium">Added to sprint plan — subtasks distributed across sprints</span>
+            : <span>Add this ticket's subtasks to the project sprint plan</span>}
+        </div>
+        <Button
+          size="sm"
+          variant={sprintAdded ? "outline" : "default"}
+          onClick={autoAssign}
+          disabled={refiningField === "sprints"}
+        >
+          {refiningField === "sprints" ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Planning…</>
+          ) : sprintAdded ? (
+            <><Check className="h-3.5 w-3.5" /> Re-plan</>
+          ) : (
+            <><Layers className="h-3.5 w-3.5" /> Add to Sprint Plan</>
+          )}
+        </Button>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
@@ -262,16 +289,6 @@ export function TicketEditor({
                 onChange={(next) => setDraft({ ...draft, subtasks: next })}
                 onRefineAll={(r) => refine("subtasks", r)}
                 refiningAll={refiningField === "subtasks"}
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-5">
-              <SprintAssigner
-                subtasks={draft.subtasks}
-                onChange={(next) => setDraft({ ...draft, subtasks: next })}
-                onAutoAssign={autoAssign}
-                autoAssigning={refiningField === "sprints"}
               />
             </CardContent>
           </Card>

@@ -37,13 +37,15 @@ function truncate(s: string, n: number) {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
-export async function assembleContext(orgId: string): Promise<AssembledContext> {
+export async function assembleContext(orgId: string, idea?: string): Promise<AssembledContext> {
   const org = await prisma.organization.findUnique({ where: { id: orgId } });
   const integrations = await prisma.integration.findMany({ where: { orgId } });
   const hasIntegration = (t: string) => integrations.some((i) => i.type === t);
 
+  const githubToken = integrations.find((i) => i.type === "GITHUB")?.accessToken ?? null;
+
   const [filesRaw, jiraTitlesRaw, notionPagesRaw, prd, existingTickets] = await Promise.all([
-    getRepoFileSummaries(org?.githubOrgName ?? null, null, LIMITS.ghFiles),
+    getRepoFileSummaries(org?.githubOrgName ?? null, null, idea ?? "", githubToken, LIMITS.ghFiles),
     getRecentTicketTitles(org?.jiraProjectKey ?? "CLAR", LIMITS.jiraTickets),
     getNotionPages([]),
     getLatestPRD(orgId),

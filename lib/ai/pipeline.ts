@@ -60,7 +60,7 @@ export async function runBuildTicketPipeline(
 ): Promise<BuildTicketPipelineResult> {
   const maxReflections = options.maxReflections ?? DEFAULT_MAX_REFLECTIONS;
   const maxIterations = maxReflections + 1;
-  const ctx = { emit, orgId };
+  const ctx = { emit, orgId, idea };
 
   const context = await contextAgent.run(orgId, ctx);
   let draft = await ticketWriterAgent.run({ idea, context }, ctx);

@@ -67,6 +67,8 @@ export interface AgentContext {
    * ledger, which lets Settings > AI Usage scope breakdowns per organization.
    */
   orgId?: string;
+  /** The raw idea text, used by ContextAgent to rank relevant codebase files. */
+  idea?: string;
 }
 
 export interface AgentMeta {

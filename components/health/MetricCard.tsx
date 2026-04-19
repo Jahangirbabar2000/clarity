@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Minus, PlugZap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function MetricCard({
@@ -12,8 +13,9 @@ export function MetricCard({
   previous,
   loading,
   formatter = (v) => v.toString(),
-  // true = higher is better (e.g. QA pass rate). false = lower is better (e.g. bug reopen)
   higherIsBetter = true,
+  connectHref,
+  connectLabel,
 }: {
   label: string;
   value: number | null;
@@ -22,6 +24,8 @@ export function MetricCard({
   loading?: boolean;
   formatter?: (v: number) => string;
   higherIsBetter?: boolean;
+  connectHref?: string;
+  connectLabel?: string;
 }) {
   if (loading) {
     return (
@@ -33,9 +37,17 @@ export function MetricCard({
   }
   if (value == null) {
     return (
-      <Card>
+      <Card className="border-dashed">
         <CardHeader><CardTitle className="text-sm text-muted-foreground">{label}</CardTitle></CardHeader>
-        <CardContent><div className="text-2xl font-semibold text-muted-foreground">—</div></CardContent>
+        <CardContent className="space-y-2">
+          <div className="text-2xl font-semibold text-muted-foreground">—</div>
+          {connectHref ? (
+            <Link href={connectHref} className="flex items-center gap-1 text-xs text-primary hover:underline">
+              <PlugZap className="h-3 w-3" />
+              {connectLabel ?? "Connect integration"}
+            </Link>
+          ) : null}
+        </CardContent>
       </Card>
     );
   }

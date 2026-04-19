@@ -31,7 +31,7 @@ export const metadata = {
     "Six specialized AI agents, routed across OpenAI, Anthropic, and Google, turn one-line product ideas into repo-grounded, sprint-ready Jira tickets.",
 };
 
-const GITHUB_URL = "https://github.com/Jahangirbabar2000/clarity";
+const GITHUB_URL = "https://github.com/AashutoshAgrawal/clarity";
 
 export default function LandingPage() {
   return (
@@ -91,7 +91,7 @@ function TopNav() {
         </Link>
         <Link href="/overview">
           <Button size="sm">
-            Open demo <ArrowRight className="h-3.5 w-3.5" />
+            Try it live <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </Link>
       </div>
@@ -131,7 +131,7 @@ function Hero() {
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <Link href="/overview">
               <Button size="lg" className="h-11 px-5 text-base">
-                Open the live demo <ArrowRight className="h-4 w-4" />
+                Launch Clarity <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link href={GITHUB_URL} target="_blank">
@@ -633,7 +633,7 @@ const FAQS = [
   },
   {
     q: "Can I use Clarity without Jira or GitHub?",
-    a: "Yes. Integrations are optional and configurable per workspace. Demo mode also ships with realistic mock data so you can explore every surface without any connected account.",
+    a: "Yes. Integrations are optional and configurable per workspace. You can explore every surface without any connected account — just sign in with GitHub and start from the workspace.",
   },
   {
     q: "How is this different from Cursor, v0, or Copilot?",
@@ -701,13 +701,12 @@ function FinalCTA() {
             See six agents collaborate on your next ticket.
           </h2>
           <p className="mx-auto max-w-xl text-muted-foreground">
-            No signup, no credit card. The live demo runs in under a second —
-            you&apos;ll watch Gemini, Claude, and GPT-4o take turns in real time.
+            Sign in with GitHub and connect your integrations. Watch Gemini, Claude, and GPT-4o collaborate on your real tickets in real time.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-            <Link href="/overview">
+            <Link href="/login">
               <Button size="lg" className="h-11 px-6 text-base">
-                Open the demo <ArrowRight className="h-4 w-4" />
+                Get started <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link href={GITHUB_URL} target="_blank">
@@ -739,7 +738,7 @@ function Footer() {
           <span>Applied GenAI · Northeastern · 2026</span>
         </div>
         <div className="flex items-center gap-6">
-          <Link href="/overview" className="hover:text-foreground">Demo</Link>
+          <Link href="/login" className="hover:text-foreground">Sign in</Link>
           <Link href="/settings" className="hover:text-foreground">Settings</Link>
           <Link href={GITHUB_URL} target="_blank" className="hover:text-foreground">
             GitHub

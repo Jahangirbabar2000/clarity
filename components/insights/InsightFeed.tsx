@@ -7,13 +7,14 @@ import { InsightCard } from "./InsightCard";
 import { Sparkles } from "lucide-react";
 import type { AIInsight } from "@/types/models";
 
-export function InsightFeed({ limit = 20, compact = false }: { limit?: number; compact?: boolean }) {
+export function InsightFeed({ limit = 20, compact = false, projectId }: { limit?: number; compact?: boolean; projectId?: string }) {
   const qc = useQueryClient();
+  const pq = projectId ? `&projectId=${projectId}` : "";
 
   const list = useQuery<{ insights: AIInsight[] }>({
-    queryKey: ["insights", limit],
+    queryKey: ["insights", limit, projectId],
     queryFn: async () => {
-      const r = await fetch(`/api/insights/generate?limit=${limit}`);
+      const r = await fetch(`/api/insights/generate?limit=${limit}${pq}`);
       if (!r.ok) throw new Error("failed");
       return r.json();
     },
@@ -21,7 +22,7 @@ export function InsightFeed({ limit = 20, compact = false }: { limit?: number; c
 
   const gen = useMutation({
     mutationFn: async () => {
-      const r = await fetch("/api/insights/generate", { method: "POST", body: JSON.stringify({}) });
+      const r = await fetch(`/api/insights/generate${projectId ? `?projectId=${projectId}` : ""}`, { method: "POST", body: JSON.stringify({}) });
       if (!r.ok) throw new Error("failed");
       return r.json();
     },

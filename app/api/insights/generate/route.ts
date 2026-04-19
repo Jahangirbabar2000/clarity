@@ -3,10 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { ensureDemoOrg } from "@/lib/db/queries";
 import { healthAnalystAgent, type AgentEvent } from "@/lib/ai/agents";
-import { getQAPassRate, getBugReopenRate, getSprintVelocity } from "@/lib/integrations/jira";
+import { getQAPassRate, getBugReopenRate, getSprintVelocity, type JiraCreds } from "@/lib/integrations/jira";
 import { getPRCycleTime, getLibraryHealth } from "@/lib/integrations/github";
 import { getTopErrors } from "@/lib/integrations/sentry";
-import { mockBuildHealth } from "@/lib/integrations/mock-data";
 
 const bodySchema = z.object({ orgId: z.string().optional() });
 
@@ -16,17 +15,35 @@ export async function POST(req: Request) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Bad input" }, { status: 400 });
 
-  const org = parsed.data.orgId
-    ? await prisma.organization.findUnique({ where: { id: parsed.data.orgId } })
+  const url = new URL((req as Request & { url: string }).url);
+  const projectId = url.searchParams.get("projectId") ?? parsed.data.orgId;
+  const org = projectId
+    ? await prisma.organization.findUnique({ where: { id: projectId } })
     : await ensureDemoOrg();
   if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
 
+  const [jiraIntegration, ghIntegration] = await Promise.all([
+    prisma.integration.findFirst({ where: { orgId: org.id, type: "JIRA" } }),
+    prisma.integration.findFirst({ where: { orgId: org.id, type: "GITHUB" } }),
+  ]);
+
+  const jiraMeta = jiraIntegration?.meta as { baseUrl?: string; email?: string; projectKey?: string } | null;
+  const jiraCreds: JiraCreds | null = jiraMeta?.baseUrl && jiraMeta?.email
+    ? { baseUrl: jiraMeta.baseUrl, email: jiraMeta.email, token: jiraIntegration!.accessToken }
+    : null;
+  const jiraProjectKey = jiraMeta?.projectKey ?? org.jiraProjectKey ?? "CLAR";
+
+  const ghToken = ghIntegration?.accessToken ?? null;
+  const ghRepos = (ghIntegration?.meta as { repos?: string[] } | null)?.repos ?? [];
+  const [ghOwner, ghRepo] = (ghRepos[0] ?? "").split("/");
+  const ghOrgName = ghOwner || org.githubOrgName;
+
   const [qa, bug, pr, velocity, lib, topErrors] = await Promise.all([
-    getQAPassRate(org.jiraProjectKey ?? "CLAR"),
-    getBugReopenRate(org.jiraProjectKey ?? "CLAR"),
-    getPRCycleTime(org.githubOrgName, null),
-    getSprintVelocity(org.jiraProjectKey ?? "CLAR"),
-    getLibraryHealth(org.githubOrgName, null),
+    getQAPassRate(jiraProjectKey, 8, jiraCreds),
+    getBugReopenRate(jiraProjectKey, 56, jiraCreds),
+    getPRCycleTime(ghOrgName ?? null, ghRepo ?? null, 56, ghToken),
+    getSprintVelocity(jiraProjectKey, 6, jiraCreds),
+    getLibraryHealth(ghOrgName ?? null, ghRepo ?? null),
     getTopErrors(org.sentryOrg ?? "demo", "demo"),
   ]);
 
@@ -52,8 +69,8 @@ export async function POST(req: Request) {
           trend: pr.trend.map((t) => t.value),
         },
         buildFailureRate: {
-          current: mockBuildHealth.current,
-          previous: mockBuildHealth.previous,
+          current: null,
+          previous: null,
         },
         libraryHealth: {
           upToDate: lib.upToDate,
@@ -91,7 +108,7 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const orgId = url.searchParams.get("orgId");
+  const orgId = url.searchParams.get("projectId") ?? url.searchParams.get("orgId");
   const limit = Number(url.searchParams.get("limit") ?? 20);
   const org = orgId
     ? await prisma.organization.findUnique({ where: { id: orgId } })

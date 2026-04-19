@@ -60,7 +60,7 @@ export const contextAgent: Agent<string, ContextAgentOutput> = {
       "Reading your codebase, Jira history, Notion, and PRDs…",
       ctx,
       async () => {
-        const raw = await assembleContext(orgId);
+        const raw = await assembleContext(orgId, ctx.idea);
 
         ctx.emit({
           type: "agent_progress",

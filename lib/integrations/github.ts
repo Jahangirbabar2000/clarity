@@ -3,19 +3,21 @@ import type { MetricSeries } from "@/types/models";
 import { USE_MOCKS } from "@/lib/utils";
 import { mockPRCycleTime, mockLibraryHealth, mockRecentCommits } from "./mock-data";
 
-function client() {
-  const token = process.env.GITHUB_ACCESS_TOKEN;
-  if (!token) return null;
-  return new Octokit({ auth: token });
+function client(token?: string | null) {
+  const t = token ?? process.env.GITHUB_ACCESS_TOKEN;
+  if (!t) return null;
+  return new Octokit({ auth: t });
 }
 
 export async function getPRCycleTime(
   orgName: string | null,
   repo: string | null,
   sinceDays = 56,
+  token?: string | null,
 ): Promise<MetricSeries> {
-  const gh = client();
-  if (!gh || !orgName || !repo || USE_MOCKS) return mockPRCycleTime;
+  const gh = client(token);
+  if (USE_MOCKS) return mockPRCycleTime;
+  if (!gh || !orgName || !repo) return { hasData: false, current: null, previous: null, trend: [] };
   try {
     const since = new Date(Date.now() - sinceDays * 86400_000).toISOString();
     const prs = await gh.paginate(gh.pulls.list, {
@@ -42,12 +44,12 @@ export async function getPRCycleTime(
     const previous = trend.at(-2)?.value ?? null;
     return { hasData: trend.length > 0, current, previous, trend };
   } catch {
-    return mockPRCycleTime;
+    return { hasData: false, current: null, previous: null, trend: [] };
   }
 }
 
-export async function getOpenStalePRs(orgName: string, repo: string) {
-  const gh = client();
+export async function getOpenStalePRs(orgName: string, repo: string, token?: string | null) {
+  const gh = client(token);
   if (!gh || USE_MOCKS) {
     return [
       { number: 412, title: "WIP: checkout refactor", author: "alice", lastActivityDays: 6 },
@@ -71,11 +73,83 @@ export async function getOpenStalePRs(orgName: string, repo: string) {
 }
 
 export async function getLibraryHealth(_orgName: string | null, _repo: string | null) {
-  return mockLibraryHealth;
+  if (USE_MOCKS) return mockLibraryHealth;
+  return { hasData: false, upToDate: 0, minorUpdates: 0, criticalCVEs: 0, sample: [] };
 }
 
-export async function getRepoFileSummaries(_orgName: string | null, _repo: string | null, maxFiles = 10) {
-  return mockRecentCommits.slice(0, maxFiles);
+const CODE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".rb", ".swift", ".kt", ".cs", ".cpp", ".c", ".h"];
+const EXCLUDE_PATTERNS = ["node_modules/", "dist/", ".next/", "__pycache__/", ".git/", "vendor/", "coverage/", "build/", ".turbo/"];
+const MAX_FILE_BYTES = 4000;
+
+export async function getRepoFileSummaries(
+  orgName: string | null,
+  repo: string | null,
+  idea: string = "",
+  token: string | null = null,
+  maxFiles = 10,
+): Promise<{ path: string; summary: string }[]> {
+  const gh = token ? new Octokit({ auth: token }) : client();
+  if (!gh || !orgName || USE_MOCKS) return mockRecentCommits.slice(0, maxFiles);
+
+  try {
+    let repoName = repo;
+    if (!repoName) {
+      // Try org repos first, fall back to user repos
+      let repos: { name: string }[] = [];
+      try {
+        const { data } = await gh.repos.listForOrg({ org: orgName, sort: "updated", per_page: 5 });
+        repos = data;
+      } catch {
+        const { data } = await gh.repos.listForAuthenticatedUser({ sort: "updated", per_page: 5 });
+        repos = data;
+      }
+      repoName = repos[0]?.name ?? null;
+      if (!repoName) return mockRecentCommits.slice(0, maxFiles);
+    }
+
+    const { data: repoData } = await gh.repos.get({ owner: orgName, repo: repoName });
+    const { data: treeData } = await gh.git.getTree({
+      owner: orgName,
+      repo: repoName,
+      tree_sha: repoData.default_branch,
+      recursive: "1",
+    });
+
+    const codeFiles = (treeData.tree ?? [])
+      .filter((f) => f.type === "blob" && f.path)
+      .filter((f) => CODE_EXTENSIONS.some((ext) => f.path!.endsWith(ext)))
+      .filter((f) => !EXCLUDE_PATTERNS.some((p) => f.path!.includes(p)));
+
+    // Score files by keyword overlap with the idea
+    const ideaWords = idea.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+    const scored = codeFiles.map((f) => {
+      const pathLower = f.path!.toLowerCase();
+      const score = ideaWords.reduce((s, word) => s + (pathLower.includes(word) ? 2 : 0), 0)
+        // Boost API routes, services, and controllers as they're usually most relevant
+        + (pathLower.includes("api/") || pathLower.includes("service") || pathLower.includes("controller") ? 1 : 0);
+      return { path: f.path!, score };
+    });
+    scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+
+    const topFiles = scored.slice(0, maxFiles);
+    const results = await Promise.all(
+      topFiles.map(async ({ path }) => {
+        try {
+          const { data } = await gh.repos.getContent({ owner: orgName!, repo: repoName!, path });
+          if ("content" in data && data.encoding === "base64") {
+            const content = Buffer.from(data.content, "base64").toString("utf-8").slice(0, MAX_FILE_BYTES);
+            return { path, summary: content };
+          }
+        } catch { /* skip unreadable files */ }
+        return null;
+      }),
+    );
+
+    const valid = results.filter((r): r is { path: string; summary: string } => r !== null && r.summary.trim().length > 0);
+    return valid.length > 0 ? valid : mockRecentCommits.slice(0, maxFiles);
+  } catch {
+    return mockRecentCommits.slice(0, maxFiles);
+  }
 }
 
 function median(nums: number[]) {

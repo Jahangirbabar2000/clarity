@@ -15,8 +15,19 @@ const bodySchema = z.object({
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const org = await ensureDemoOrg();
+async function resolveOrg(req: Request) {
+  const url = new URL(req.url);
+  const projectId = url.searchParams.get("projectId");
+  if (projectId) {
+    const org = await prisma.organization.findUnique({ where: { id: projectId } });
+    return org;
+  }
+  return ensureDemoOrg();
+}
+
+export async function GET(req: Request) {
+  const org = await resolveOrg(req);
+  if (!org) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   const integrations = await prisma.integration.findMany({ where: { orgId: org.id } });
   const statuses = TYPES.map((t) => {
     const found = integrations.find((i) => i.type === t);
@@ -33,7 +44,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const parsed = bodySchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "Bad input" }, { status: 400 });
-  const org = await ensureDemoOrg();
+  const org = await resolveOrg(req);
+  if (!org) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   const data = parsed.data;
   const existing = await prisma.integration.findFirst({ where: { orgId: org.id, type: data.type } });
   if (existing) {
@@ -65,9 +77,8 @@ export async function DELETE(req: Request) {
   if (!type || !(TYPES as readonly string[]).includes(type)) {
     return NextResponse.json({ error: "bad type" }, { status: 400 });
   }
-  const org = await ensureDemoOrg();
-  await prisma.integration.deleteMany({
-    where: { orgId: org.id, type: type as IntegrationType },
-  });
+  const org = await resolveOrg(req);
+  if (!org) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  await prisma.integration.deleteMany({ where: { orgId: org.id, type: type as IntegrationType } });
   return NextResponse.json({ ok: true });
 }

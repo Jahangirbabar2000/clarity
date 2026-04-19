@@ -1,4 +1,5 @@
 import { prisma } from "./client";
+import type { IntegrationType } from "@prisma/client";
 
 export async function getOrgForUser(userId: string) {
   const member = await prisma.orgMember.findFirst({
@@ -9,14 +10,58 @@ export async function getOrgForUser(userId: string) {
   return member?.org ?? null;
 }
 
+export async function listProjectsForUser(userId: string) {
+  const memberships = await prisma.orgMember.findMany({
+    where: { userId },
+    include: { org: true },
+    orderBy: { id: "asc" },
+  });
+  return memberships.map((m) => m.org);
+}
+
+export async function getProjectById(projectId: string, userId: string) {
+  const member = await prisma.orgMember.findFirst({
+    where: { orgId: projectId, userId },
+    include: { org: true },
+  });
+  return member?.org ?? null;
+}
+
+export async function createProject(userId: string, name: string) {
+  const org = await prisma.organization.create({
+    data: { name, jiraProjectKey: "CLAR" },
+  });
+  await prisma.orgMember.create({
+    data: { orgId: org.id, userId, role: "OWNER" },
+  });
+  await prisma.user.update({
+    where: { id: userId },
+    data: { lastVisitedProjectId: org.id },
+  });
+  return org;
+}
+
+export async function updateLastVisitedProject(userId: string, projectId: string) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { lastVisitedProjectId: projectId },
+  });
+}
+
+export async function getLastVisitedProject(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { lastVisitedProjectId: true },
+  });
+  if (!user?.lastVisitedProjectId) return null;
+  return getProjectById(user.lastVisitedProjectId, userId);
+}
+
 export async function ensureDemoOrg() {
   let org = await prisma.organization.findFirst({ where: { name: "Demo Org" } });
   if (!org) {
     org = await prisma.organization.create({
-      data: {
-        name: "Demo Org",
-        jiraProjectKey: "CLAR",
-      },
+      data: { name: "Demo Org", jiraProjectKey: "CLAR" },
     });
   }
   return org;
@@ -57,8 +102,6 @@ export async function listInsights(orgId: string, limit = 20) {
     take: limit,
   });
 }
-
-import type { IntegrationType } from "@prisma/client";
 
 export async function getIntegration(orgId: string, type: IntegrationType) {
   return prisma.integration.findFirst({ where: { orgId, type } });

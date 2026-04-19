@@ -5,10 +5,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const orgIdParam = url.searchParams.get("orgId");
-  const org = orgIdParam
-    ? { id: orgIdParam }
-    : await ensureDemoOrg();
+  const projectId = url.searchParams.get("projectId") ?? url.searchParams.get("orgId");
+  const org = projectId ? { id: projectId } : await ensureDemoOrg();
   const tickets = await listTickets(org.id);
   return NextResponse.json({ tickets });
 }
