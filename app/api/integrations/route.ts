@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { IntegrationType } from "@prisma/client";
+import { type IntegrationType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { ensureDemoOrg } from "@/lib/db/queries";
 
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
       data: {
         accessToken: data.accessToken ?? existing.accessToken,
         refreshToken: data.refreshToken ?? existing.refreshToken,
-        meta: data.meta ?? (existing.meta ?? undefined),
+        meta: (data.meta ?? existing.meta ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       },
     });
   } else {
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
         type: data.type,
         accessToken: data.accessToken ?? "placeholder",
         refreshToken: data.refreshToken,
-        meta: data.meta ?? {},
+        meta: (data.meta ?? {}) as Prisma.InputJsonValue,
       },
     });
   }
