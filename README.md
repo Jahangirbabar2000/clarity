@@ -2,6 +2,17 @@
 
 **Clarity** is an AI-powered engineering intelligence platform that turns raw product ideas into production-ready Jira tickets and surfaces real-time engineering health insights — all in one workspace.
 
+## Live Demo
+
+[**https://clarity-gold-alpha.vercel.app**](https://clarity-gold-alpha.vercel.app)
+
+Two ways to try it:
+
+- **Continue in Demo Mode** (no account required) — each browser gets its own private sandbox via an HTTP-only cookie. Create projects, generate tickets with the full multi-agent pipeline, and explore health insights without signing in. Data is isolated per browser, so nothing you do is visible to other visitors.
+- **Sign in with GitHub** — for a technical reviewer who wants to wire up a real GitHub repo, Jira board, and PRD and see the end-to-end integration flow.
+
+Everything below (multi-agent reflection loop, tool-using Critic, live AI routing panel, usage ledger) works in both modes. Demo Mode uses realistic pre-built fallbacks when an external provider is absent.
+
 ---
 
 ## What It Does
@@ -345,7 +356,11 @@ Tests stub all LLM SDKs (OpenAI, Anthropic, Google) and Prisma, so the suite run
 
 ## Demo Mode
 
-Clarity works out of the box without any external integrations. Set `CLARITY_USE_MOCKS=true` in `.env.local` and all metric endpoints, GitHub, Jira, Sentry, Datadog, and Notion calls return realistic pre-built data. The ticket builder also has a rich fallback (a complete multi-currency checkout feature with 7 subtasks) if `OPENAI_API_KEY` is not set.
+Clarity works out of the box without any external integrations.
+
+**On the deployed app** ([clarity-gold-alpha.vercel.app](https://clarity-gold-alpha.vercel.app)), clicking **Continue in Demo Mode** on the login page drops a per-browser HTTP-only cookie (`clarity_demo_user_id`) and provisions a dedicated user row in Postgres keyed on that cookie. Every browser — incognito windows included — gets its own isolated sandbox, so graders never see each other's data. GitHub OAuth login is available alongside, for reviewers who want to try the real-integration flow.
+
+**Locally**, set `CLARITY_USE_MOCKS=true` in `.env.local` and all metric endpoints, GitHub, Jira, Sentry, Datadog, and Notion calls return realistic pre-built data. The ticket builder also has a rich fallback (a complete multi-currency checkout feature with 7 subtasks) if no AI key is set.
 
 This makes it possible to demo the full product with only a PostgreSQL database.
 
