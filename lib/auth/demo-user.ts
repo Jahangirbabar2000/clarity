@@ -1,19 +1,20 @@
+import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 
-export const DEMO_MODE = process.env.CLARITY_USE_MOCKS === "true";
+export const DEMO_MODE = true;
 
-const DEMO_USER_ID = "demo-user";
+const DEMO_COOKIE = "clarity_demo_user_id";
 
-export async function ensureDemoUser() {
-  const existing = await prisma.user.findUnique({ where: { id: DEMO_USER_ID } });
-  if (existing) return existing;
-  return prisma.user.create({
-    data: {
-      id: DEMO_USER_ID,
+async function ensureDemoUser(id: string) {
+  return prisma.user.upsert({
+    where: { id },
+    update: {},
+    create: {
+      id,
       name: "Demo User",
-      email: "demo@clarity.local",
+      email: `${id}@clarity.local`,
     },
   });
 }
@@ -21,9 +22,9 @@ export async function ensureDemoUser() {
 export async function getEffectiveUserId(): Promise<string | null> {
   const session = await getServerSession(authOptions);
   if (session?.user?.id) return session.user.id;
-  if (DEMO_MODE) {
-    const user = await ensureDemoUser();
-    return user.id;
-  }
-  return null;
+
+  const demoId = cookies().get(DEMO_COOKIE)?.value;
+  if (!demoId) return null;
+  const user = await ensureDemoUser(demoId);
+  return user.id;
 }
