@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getEffectiveUserId } from "@/lib/auth/demo-user";
 import { getProjectById } from "@/lib/db/queries";
 import { prisma } from "@/lib/db/client";
 import {
@@ -17,10 +16,10 @@ export const dynamic = "force-dynamic";
 // ── GET /api/projects/[projectId]/sprint-plan ─────────────────────────────────
 // Returns merged sprint plan: Jira sprints + Clarity ticket assignments.
 export async function GET(_req: Request, { params }: { params: { projectId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = await getEffectiveUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const project = await getProjectById(params.projectId, session.user.id);
+  const project = await getProjectById(params.projectId, userId);
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const projectKey = project.jiraProjectKey ?? null;
@@ -190,10 +189,10 @@ const moveSchema = z.object({
 });
 
 export async function POST(req: Request, { params }: { params: { projectId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = await getEffectiveUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const project = await getProjectById(params.projectId, session.user.id);
+  const project = await getProjectById(params.projectId, userId);
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const parsed = moveSchema.safeParse(await req.json());

@@ -37,14 +37,14 @@ export default function LoginPage() {
 
           <Button
             variant="outline"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/projects")}
             className="w-full"
           >
             <Zap className="h-4 w-4" /> Continue in Demo Mode
           </Button>
 
           <p className="text-center text-xs text-muted-foreground">
-            Demo mode uses realistic mock data — no integrations required.
+            Demo mode signs you in as a shared demo user — no GitHub account required.
           </p>
         </CardContent>
       </Card>

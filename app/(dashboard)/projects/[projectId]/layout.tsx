@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getEffectiveUserId } from "@/lib/auth/demo-user";
 import { getProjectById, updateLastVisitedProject } from "@/lib/db/queries";
 import { ProjectProvider } from "@/lib/context/ProjectContext";
 import { ProjectSidebar, ProjectMobileTabBar } from "@/components/layout/ProjectSidebar";
@@ -13,13 +12,13 @@ export default async function ProjectLayout({
   children: React.ReactNode;
   params: { projectId: string };
 }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) redirect("/login");
+  const userId = await getEffectiveUserId();
+  if (!userId) redirect("/login");
 
-  const project = await getProjectById(params.projectId, session.user.id);
+  const project = await getProjectById(params.projectId, userId);
   if (!project) redirect("/projects");
 
-  await updateLastVisitedProject(session.user.id, params.projectId);
+  await updateLastVisitedProject(userId, params.projectId);
 
   return (
     <ProjectProvider project={project}>
