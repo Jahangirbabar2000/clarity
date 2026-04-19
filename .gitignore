@@ -9,3 +9,4 @@ out
 prisma/migrations/dev.db*
 coverage
 .vitest
+tsconfig.tsbuildinfo

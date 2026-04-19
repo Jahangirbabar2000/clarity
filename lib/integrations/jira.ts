@@ -181,7 +181,7 @@ export async function createJiraIssue(
     projectKey: string;
     summary: string;
     description: string;
-    issueType: "Story" | "Bug" | "Task" | "Spike";
+    issueType: "Story" | "Bug" | "Task" | "Spike" | "Subtask";
     labels?: string[];
     parentKey?: string;
   },

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
-import { createJiraIssue, getJiraBoardId, getOrCreateJiraSprint, assignIssuesToJiraSprint } from "@/lib/integrations/jira";
+import {
+  createJiraIssue,
+  getJiraBoardId,
+  getOrCreateJiraSprint,
+  assignIssuesToJiraSprint,
+  type JiraCreds,
+} from "@/lib/integrations/jira";
 
 const schema = z.object({ ticketId: z.string() });
 
@@ -24,7 +30,25 @@ export async function POST(req: Request) {
   });
   if (!ticket) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const projectKey = ticket.org.jiraProjectKey ?? "CLAR";
+  // Prefer the per-project Jira Integration (saved via the Connections UI).
+  // Fall back to org.jiraProjectKey + env creds for backwards compatibility.
+  const jiraIntegration = await prisma.integration.findFirst({
+    where: { orgId: ticket.orgId, type: "JIRA" },
+  });
+  const meta = (jiraIntegration?.meta ?? {}) as {
+    baseUrl?: string;
+    email?: string;
+    projectKey?: string;
+  };
+  const creds: JiraCreds | null =
+    jiraIntegration?.accessToken && meta.baseUrl && meta.email
+      ? {
+          baseUrl: meta.baseUrl.replace(/\/$/, ""),
+          email: meta.email,
+          token: jiraIntegration.accessToken,
+        }
+      : null;
+  const projectKey = meta.projectKey ?? ticket.org.jiraProjectKey ?? "CLAR";
 
   const ticketBody = [
     ticket.description,
@@ -40,30 +64,34 @@ export async function POST(req: Request) {
   ].join("\n");
 
   const issueType = ticket.type === "BUG" ? "Bug" : ticket.type === "SPIKE" ? "Spike" : "Story";
-  const parent = await createJiraIssue({
-    projectKey,
-    summary: ticket.title,
-    description: ticketBody,
-    issueType,
-    labels: ticket.suggestedLabels,
-  });
+  const parent = await createJiraIssue(
+    {
+      projectKey,
+      summary: ticket.title,
+      description: ticketBody,
+      issueType,
+      labels: ticket.suggestedLabels,
+    },
+    creds,
+  );
 
-  // Build sprint → issue keys map so we can assign to Jira sprints after creation
-  const sprintKeyMap = new Map<string, string[]>(); // sprintName → jiraKeys
+  const sprintKeyMap = new Map<string, string[]>();
 
   const subtaskResults: { subtaskId: string; url: string }[] = [];
   for (const s of ticket.subtasks) {
-    const child = await createJiraIssue({
-      projectKey,
-      summary: s.title,
-      description: s.description,
-      issueType: "Task",
-      parentKey: parent.key,
-    });
+    const child = await createJiraIssue(
+      {
+        projectKey,
+        summary: s.title,
+        description: s.description,
+        issueType: "Subtask",
+        parentKey: parent.key,
+      },
+      creds,
+    );
     await prisma.subtask.update({ where: { id: s.id }, data: { jiraId: child.key, jiraUrl: child.url } });
     subtaskResults.push({ subtaskId: s.id, url: child.url });
 
-    // Track which sprint this subtask belongs to
     const sprintName = (s as typeof s & { sprintAssignment?: { sprint: { name: string } } | null }).sprintAssignment?.sprint?.name;
     if (sprintName) {
       const existing = sprintKeyMap.get(sprintName) ?? [];
@@ -72,14 +100,13 @@ export async function POST(req: Request) {
     }
   }
 
-  // Sync sprint assignments to Jira Agile API (best-effort — never block the push)
   if (sprintKeyMap.size > 0) {
     try {
-      const boardId = await getJiraBoardId(projectKey);
+      const boardId = await getJiraBoardId(projectKey, creds);
       if (boardId) {
         for (const [sprintName, issueKeys] of sprintKeyMap) {
-          const jiraSprintId = await getOrCreateJiraSprint(boardId, sprintName);
-          if (jiraSprintId) await assignIssuesToJiraSprint(jiraSprintId, issueKeys);
+          const jiraSprintId = await getOrCreateJiraSprint(boardId, sprintName, creds);
+          if (jiraSprintId) await assignIssuesToJiraSprint(jiraSprintId, issueKeys, creds);
         }
       }
     } catch { /* sprint sync is non-blocking */ }

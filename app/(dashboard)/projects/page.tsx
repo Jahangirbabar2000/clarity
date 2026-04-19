@@ -21,11 +21,20 @@ export default function ProjectsPage() {
 
   const { data, isLoading } = useQuery<{ projects: Project[] }>({
     queryKey: ["projects"],
-    queryFn: () => fetch("/api/projects").then((r) => r.json()),
+    queryFn: async () => {
+      const r = await fetch("/api/projects");
+      if (r.status === 401) {
+        router.replace(`/login?callbackUrl=${encodeURIComponent("/projects")}`);
+        return { projects: [] };
+      }
+      if (!r.ok) throw new Error(`Failed to load projects (${r.status})`);
+      const json = await r.json();
+      return { projects: Array.isArray(json?.projects) ? json.projects : [] };
+    },
   });
 
   useEffect(() => {
-    if (!isLoading && data?.projects.length === 1) {
+    if (!isLoading && data?.projects?.length === 1) {
       router.replace(`/projects/${data.projects[0].id}/overview`);
     }
   }, [isLoading, data, router]);

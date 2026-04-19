@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { Github, BookOpen, FileText, Database } from "lucide-react";
 import { IdeaInput } from "@/components/workspace/IdeaInput";
 import { TicketEditor } from "@/components/workspace/TicketEditor";
 import { AgentTimeline } from "@/components/workspace/AgentTimeline";
 import type { TicketWithRelations } from "@/types/models";
 import type { ContextSummary } from "@/components/workspace/ContextPanel";
 import type { AgentEvent, CritiqueReport } from "@/types/agents";
+import type { IntegrationStatus } from "@/types/api";
 
 type Phase =
   | { name: "idle" }
@@ -20,6 +23,26 @@ export default function NewTicketPage() {
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const router = useRouter();
+
+  const { data: integrationsData } = useQuery<{ integrations: IntegrationStatus[] }>({
+    queryKey: ["integrations", projectId],
+    queryFn: async () => (await fetch(`/api/integrations?projectId=${projectId}`)).json(),
+  });
+
+  const { data: prdData } = useQuery<{ prds: { id: string }[] }>({
+    queryKey: ["prds", projectId],
+    queryFn: async () => (await fetch(`/api/integrations/prd?projectId=${projectId}`)).json(),
+  });
+
+  const isConnected = (type: IntegrationStatus["type"]) =>
+    integrationsData?.integrations.some((i) => i.type === type && i.connected) ?? false;
+
+  const sources = [
+    { key: "github", label: "GitHub", icon: Github, connected: isConnected("GITHUB") },
+    { key: "notion", label: "Notion", icon: BookOpen, connected: isConnected("NOTION") },
+    { key: "prd", label: "PRD", icon: FileText, connected: (prdData?.prds?.length ?? 0) > 0 },
+    { key: "jira", label: "Jira", icon: Database, connected: isConnected("JIRA") },
+  ];
 
   const build = async (idea: string) => {
     setPhase({ name: "building", progress: "Connecting to Clarity…" });
@@ -92,7 +115,7 @@ export default function NewTicketPage() {
   return (
     <div className="py-10">
       <div className="mx-auto max-w-3xl space-y-6">
-        <IdeaInput onSubmit={build} loading={phase.name === "building"} progress={phase.name === "building" ? phase.progress : undefined} />
+        <IdeaInput onSubmit={build} loading={phase.name === "building"} progress={phase.name === "building" ? phase.progress : undefined} sources={sources} />
         {agentEvents.length > 0 && <AgentTimeline events={agentEvents} title="Multi-agent pipeline" subtitle="Context → Writer → Critic (↻ reflection)" />}
         {phase.name === "error" && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{phase.message}</div>}
       </div>
